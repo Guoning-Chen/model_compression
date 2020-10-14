@@ -4,36 +4,28 @@ Teacher-Student model implementation by Cheng-Sheng Chan
 github : https://github.com/chengshengchan/model_compression
 '''
 
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import numpy as np
-import pdb, os, sys
+import os, sys
 import time
-import argparse
 
+tf.disable_v2_behavior()
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='teacher-student model')
-    parser.add_argument('--model', dest='model', help="model_path to save the student model\n In testing, give trained student model.", type=str)
-    parser.add_argument('--task', dest='task', help='task for this file, train/test/val', type=str)
-    parser.add_argument('--lr', dest='lr', default=1e-3, help='learning rate', type=float)
-    parser.add_argument('--epoch', dest='epoch', default=100, help='total epoch', type=int)
-    parser.add_argument('--dropout', dest='dropout', default=0.5, help="dropout ratio", type=float)
-    parser.add_argument('--noisy', action='store_true', help='add noisy to logits (noisy-teacher model')
-    parser.add_argument('--noisy_ratio', dest='Nratio', default=0.5, help="noisy ratio", type=float)
-    parser.add_argument('--noisy_sigma', dest='Nsigma', default=0.9, help="noisy sigma", type=float)
-    parser.add_argument('--KD', action='store_true', help='knowledge distilling, hinton 2014')
-    parser.add_argument('--lamda', dest='lamda', default=0.3, help='KD method. lamda between original loss and soft-target loss.', type=float)
-    parser.add_argument('--tau', dest='tau', default=3.0, help='KD method. tau stands for temperature.', type=float)
-    parser.add_argument('--batchsize', dest='batchsize', default=256, type=int)
-    if len(sys.argv) == 1:
-        parser.print_help()
-        sys.exit(1)
+# 全局参数
+global model, task, lr, epoch, dropout, noisy,  Nratio, Nsigma, KD, lamda, tau, batchsize
+model = 'savemodel'  # model_path to save the student model\n In testing, give trained student model.", type=str)
+task = 'test'  # 'task for this file, train/test/val'
+lr = 1e-3
+epoch = 100
+dropout = 0.5
+noisy = False  # weather add noisy to logits (noisy-teacher model')
+Nratio = 0.5  # noisy ratio
+Nsigma = 0.9  # noisy sigma
+KD = False  # (knowledge distilling, hinton 2014')
+lamda = 0.3  # 'KD method. lamda between original loss and soft-target loss.', type=float)
+tau = 3.0  # KD method. tau stands for temperature
+batchsize = 256
 
-    args = parser.parse_args()
-    return args, parser
-
-global args, parser
-args, parser = parse_args()
 
 class bcolors:
     END  = '\033[0m'  # white (normal)
@@ -65,8 +57,6 @@ def avgpool2d(x, k, s, padding='SAME'):
                           padding=padding)
 
 
-
-batch_size=args.batchsize
 dim=32
 n_classes=10
 # placeholders
@@ -210,10 +200,10 @@ def read_cifar10(flag):
         label= np.zeros((10000,1))
 
     N = 10000
-    for i in xrange(len(batches)):
+    for i in range(len(batches)):
         b = batches[i]
         temp = unpickle(os.path.join(path,b))
-        for j in xrange(N):
+        for j in range(N):
             data[N*i+j][:,:,2] = np.reshape(temp['data'][j][2048:],(32,32))
             data[N*i+j][:,:,1] = np.reshape(temp['data'][j][1024:2048],(32,32))
             data[N*i+j][:,:,0] = np.reshape(temp['data'][j][:1024],(32,32))
@@ -222,23 +212,23 @@ def read_cifar10(flag):
 
 
 def train():
-    learning_rate=args.lr
-    model_path=args.model
-    total_epoch = args.epoch
+    learning_rate = lr
+    model_path=model
+    total_epoch = epoch
     teacher=nin()
     student=lenet()
-    if args.noisy == True:
-        drop_scale = 1/args.Nratio
+    if noisy == True:
+        drop_scale = 1 / Nratio
         noisy_mask = tf.nn.dropout( tf.constant(np.float32(np.ones((batch_size,1)))/drop_scale) ,keep_prob=args.Nratio) #(batchsize,1)
         gaussian = tf.random_normal(shape=[batch_size,1], mean=0.0, stddev=args.Nsigma)
         noisy = tf.mul(noisy_mask, gaussian)
         #noisy_add = tf.add(tf.constant(np.float32(np.ones((batch_size,1)))), noisy)
         teacher = tf.mul(teacher, tf.tile(noisy,tf.constant([1,10])))   #(batchsize,10)
         #teacher = tf.add(teacher, tf.tile(noisy,tf.constant([1,10])))
-        print bcolors.G+"prepare for training, noisy mode"+bcolors.END
+        print(bcolors.G+"prepare for training, noisy mode"+bcolors.END)
         tf_loss = tf.nn.l2_loss(teacher - student)/batch_size
-    elif args.KD == True:   # correct Hinton method at 2017.1.3
-        print bcolors.G+"prepare for training, knowledge distilling mode"+bcolors.END
+    elif KD == True:   # correct Hinton method at 2017.1.3
+        print(bcolors.G+"prepare for training, knowledge distilling mode"+bcolors.END)
         one_hot = tf.one_hot(y, n_classes,1.0,0.0)
         #one_hot = tf.cast(one_hot_int, tf.float32)
         teacher_tau = tf.scalar_mul(1.0/args.tau, teacher)
@@ -247,7 +237,7 @@ def train():
         objective2 = tf.scalar_mul(0.5, tf.square(student_tau-teacher_tau))
         tf_loss = (args.lamda*tf.reduce_sum(objective1) + (1-args.lamda)*tf.reduce_sum(objective2))/batch_size
     else:
-        print bcolors.G+"prepare for training, NIPS2014 mode"+bcolors.END
+        print(bcolors.G+"prepare for training, NIPS2014 mode"+bcolors.END)
         tf_loss = tf.nn.l2_loss(teacher - student)/batch_size
 
     optimizer1 = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(tf_loss)
@@ -267,11 +257,11 @@ def train():
     decay_step = int(total_epoch*0.8)
     cnt=0
     dropout_rate=args.dropout
-    print bcolors.G+"number of iterations (per epoch) ="+str(len(data)/batch_size)+bcolors.END
-    for i in xrange(total_epoch):
+    print(bcolors.G+"number of iterations (per epoch) ="+str(len(data)/batch_size)+bcolors.END)
+    for i in range(total_epoch):
         np.random.shuffle(index)
         cost_sum=0
-        for j in xrange(iterations):
+        for j in range(iterations):
             batch_x = np.float32(data[index[j*batch_size:(j+1)*batch_size]]) - mean
             batch_y = np.squeeze(np.float32(label[index[j*batch_size:(j+1)*batch_size]]))
             if cnt/decay_step == 0:
@@ -285,13 +275,14 @@ def train():
             cost_sum += cost
             #pdb.set_trace()
             #if (j % int(iterations*0.25) == 0):
-            #    print ("epoch %d-iter %d, cost = %f , avg-cost = %f"%(i, j, cost, cost/n_classes))
+            #    print(("epoch %d-iter %d, cost = %f , avg-cost = %f"%(i, j, cost, cost/n_classes))
             #    sys.stdout.flush()
         cnt +=1
         avg_time = time.time()-begin
-        print ("epoch %d - avg. %f seconds in each epoch, lr = %.0e, cost = %f , avg-cost-per-logits = %f"%(i, avg_time/cnt,lr, cost_sum, cost_sum/iterations/n_classes))
+        print("epoch %d - avg. %f seconds in each epoch, lr = %.0e, cost = %f , avg-cost-per-logits = %f"
+              % (i, avg_time/cnt,lr, cost_sum, cost_sum/iterations/n_classes))
         if np.mod(i+1, 10) == 0:
-            print ("Epoch ", i+1, " is done. Saving the model ...")
+            print("Epoch ", i+1, " is done. Saving the model ...")
             with tf.device('/cpu:0'):
                 if not os.path.exists(model_path):
                     os.makedirs(model_path)
@@ -299,8 +290,8 @@ def train():
         sys.stdout.flush()
 
 
-def test():
-    print bcolors.G+"Task : test\n"+bcolors.END
+def test_net():
+    print(bcolors.G+"Task : test\n"+bcolors.END)
     student = lenet()
     pred = tf.nn.softmax(student)
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=1.0)
@@ -316,20 +307,20 @@ def test():
     total=0
     correct=0
     begin = time.time()
-    for j in xrange(len(data)/batch_size):
+    for j in range(len(data)/batch_size):
         batch_x = data[j*batch_size:(j+1)*batch_size] - mean
         prob = sess.run([pred],
                 feed_dict={x : batch_x, y : np.ones((batch_size)), keep_prob : 1.0})
         if np.argmax(prob[0]) == label[j]:
             correct += 1
         total+=1
-        #print ("acc = %f . %d/%d"%(float(correct)/total, correct, total))
+        #print(("acc = %f . %d/%d"%(float(correct)/total, correct, total))
     end = time.time()
-    print ("acc = %f . %d/%d.  Computing time = %f seconds"%(float(correct)/total, correct, total, end-begin))
+    print("acc = %f . %d/%d.  Computing time = %f seconds"%(float(correct)/total, correct, total, end-begin))
 
 
 def valid_nin():
-    print bcolors.G+"Task : val\nvalidate the pre-trained nin model, should be same as caffe result"+bcolors.END
+    print(bcolors.G+"Task : val\nvalidate the pre-trained nin model, should be same as caffe result"+bcolors.END)
     pool3=nin()
     #pool3 = lenet()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=1.0)
@@ -341,7 +332,7 @@ def valid_nin():
     total=0
     correct=0
     begin = time.time()
-    for j in xrange(len(data)/batch_size):
+    for j in range(len(data)/batch_size):
         batch_x = data[j*batch_size:(j+1)*batch_size] - mean
         prob = sess.run([pool3],
                 feed_dict={x : batch_x, y : np.ones((batch_size)), keep_prob : 1.0})
@@ -349,29 +340,29 @@ def valid_nin():
             correct += 1
         total+=1
     end = time.time()
-    print ("acc = %f . %d/%d.  Computing time = %f seconds"%(float(correct)/total, correct, total, end-begin))
+    print("acc = %f . %d/%d.  Computing time = %f seconds"%(float(correct)/total, correct, total, end-begin))
 
 
 if __name__ == '__main__':
-    global batch_size
-    print bcolors.G+"Reading args...."
-    print args
-    print bcolors.END
-    if args.noisy == True and args.KD == True:
-        print bcolors.BOLD+bcolors.R+"Invalid args!\n"+bcolors.END+bcolors.R+"only one method can be selected, noisy or KD(knowledge distilling)"+bcolors.END
+    if noisy == True and KD == True:
+        print(bcolors.BOLD+bcolors.R+
+              "Invalid args!\n"+
+              bcolors.END+bcolors.R+
+              "only one method can be selected, noisy or KD(knowledge distilling)"+
+              bcolors.END)
         exit(1)
-    if args.task=='test' or args.task=='val':
+    if task=='test' or task=='val':
         batch_size=1
 
     x = tf.placeholder(tf.float32, [batch_size, dim, dim, 3])
     y = tf.placeholder(tf.int32, [batch_size])
     keep_prob = tf.placeholder(tf.float32) #dropout (keep probability)
     with tf.device('/gpu:0'):
-        if args.task=='train':
+        if task=='train':
             train()
-        elif args.task=='test':
-            test()
-        elif args.task=='val':
+        elif task=='test':
+            test_net()
+        elif task=='val':
             valid_nin()
         else:
-            print bcolors.BOLD+bcolors.R+"Invalid args!\n"+bcolors.END+bcolors.R+"task should be train, test, or val"+bcolors.END
+            print(bcolors.BOLD+bcolors.R+"Invalid args!\n"+bcolors.END+bcolors.R+"task should be train, test, or val"+bcolors.END)
