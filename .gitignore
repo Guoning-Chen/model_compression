@@ -1,4 +1,4 @@
-.idea/
-.pytest_cache/
+.idea
+.pytest_cache
 cifar10
 savemodel
